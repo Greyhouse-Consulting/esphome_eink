@@ -6,7 +6,7 @@ Goal is to make a low power display with weather forcast. In this case the [SMHI
 
 
 
-![Case image](https://github.com/iyseee/esphome_eink/blob/main/case.JPG "The case")
+![Case image](https://github.com/Greyhouse-Consulting/esphome_eink/blob/main/case.JPG "The case")
 
 Case used in this project : https://www.thingiverse.com/thing:5589557
 
