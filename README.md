@@ -17,7 +17,7 @@ TODO
 2. Reduce size fontsize of precipitation and round not just trunc
 3. Remove DynamicJsonDocument and replace with JsonDocument
 
-This project have been heavily inspired by the following repos
+This project is heavily inspired by the following repos
 
 https://github.com/kotope/esphome_eink_dashboard
 
