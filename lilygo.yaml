@@ -1,0 +1,439 @@
+substitutions:
+  run_time: 30sec
+  sleep_time: 10min
+
+esphome:
+  name: lilygo
+  platformio_options:
+    # Unless noted otherwise, based on https://github.com/Xinyuan-LilyGO/LilyGo-EPD47/blob/1eb6119fc31fcff7a6bafecb09f4225313859fc5/examples/demo/platformio.ini#L37
+    upload_speed: 921600
+    monitor_speed: 115200
+    board_build.mcu: esp32s3
+    board_build.f_cpu: 240000000L
+    board_build.arduino.memory_type: qspi_opi
+    board_build.flash_size: 16MB
+    board_build.flash_mode: qio
+    board_build.flash_type: qspi
+    board_build.psram_type: opi
+    board_build.memory_type: qspi_opi
+    board_build.boot_freq: 80m
+    platform_packages:
+    #   - "toolchain-riscv32-esp @8.4.0+2021r2-patch5"
+        - "toolchain-riscv32-esp @12.2.0+20230208"
+    build_flags:  # the first three defines are required for the screen library to function.
+      - "-DBOARD_HAS_PSRAM"
+      - "-DARDUINO_RUNNING_CORE=0"  # TODO: this conflicts with the value from platformio's idedata, spewing a lot of warnings during the build.
+      - "-DARDUINO_EVENT_RUNNING_CORE=0"  # and this too
+      # In addition to lilygo's settings:
+      # To enable reading logs over USB until `hardware_uart: USB_CDC` support
+      # is added to `logger:`, as detailed in <https://github.com/esphome/feature-requests/issues/1906>:
+      - "-DARDUINO_USB_MODE=1"
+      - "-DARDUINO_USB_CDC_ON_BOOT=1"
+  includes:
+    - common.h
+    - weather/WeatherState.h
+  libraries:
+    - ArduinoJson@7.0.2
+
+
+esp32:
+  board: esp32-s3-devkitc-1
+  framework:
+    type: arduino
+    version: 2.0.3
+    # platform_version: 5.1.0
+
+
+# Enable logging
+logger:
+
+# Enable Home Assistant API
+api:
+  password: "fa4172fc5337688de50dc0c38a7ae1db"
+
+ota:
+  password: "fa4172fc5337688de50dc0c38a7ae1db"
+
+
+deep_sleep:
+  run_duration: ${run_time}
+  sleep_duration: ${sleep_time}
+  id: deep_sleep_1
+
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+  # Enable fallback hotspot (captive portal) in case wifi connection fails
+  ap:
+    ssid: "Display Fallback Hotspot"
+    password: "2jkZ735CCvFW"
+
+captive_portal:
+
+
+external_components:
+  - source: github://nickolay/esphome-lilygo-t547plus
+    components: ["t547"]
+  - source: github://kaeltis/esphome-lilygo-t547plus
+    components: ["lilygo_t5_47_battery"]   
+
+sensor:
+  - platform: homeassistant
+    entity_id: sensor.temp_outdoor
+    id: temp_outdoor
+    internal: true  
+  - platform: homeassistant
+    entity_id: sensor.temp_livingroom
+    id: temp_livingroom
+    internal: true      
+  - platform: homeassistant
+    entity_id: sensor.temp_bedroom
+    id: temp_bedroom
+    internal: true      
+  - platform: homeassistant
+    entity_id: sensor.temp_basement
+    id: temp_basement
+    internal: true
+  - platform: homeassistant
+    entity_id: sensor.hum_outdoor
+    id: hum_outdoor
+    internal: true  
+  - platform: homeassistant
+    entity_id: sensor.hum_livingroom
+    id: hum_livingroom
+    internal: true      
+  - platform: homeassistant
+    entity_id: sensor.hum_bedroom
+    id: hum_bedroom
+    internal: true      
+  - platform: homeassistant
+    entity_id: sensor.hum_basement
+    id: hum_basement
+    internal: true            
+
+  - platform: lilygo_t5_47_battery
+    id: battery_voltage
+    voltage:
+      name: "Battery Voltage"
+  - platform: template
+    name: "Battery Percentage"
+    id: battery_percentage
+    lambda: |-
+      // tweak values in mapping for calibration
+      // 4.1 = max voltage
+      // 3.3 = min voltage
+      float y = (id(battery_voltage).voltage->state - 3.3) * 100.0 / (4.1 - 3.3);
+      if (y < 100.0) { return y; } else { return 100.0; };      
+
+time:
+  - platform: homeassistant
+    id: esptime      
+
+text_sensor:
+  # sun/moon
+  - platform: homeassistant
+    entity_id: sun.sun
+    id: sun
+    internal: true
+  - platform: homeassistant
+    entity_id: sensor.moon
+    id: moon
+    internal: true
+  # current conditions
+  - platform: homeassistant
+    id: condition
+    name: Current Conditions
+    entity_id: weather.smhi_home
+
+  - platform: homeassistant
+    id: dailyForecast
+    name: Daily Forecast
+    entity_id:  weather.smhi_home
+    attribute: forecast
+    filters:
+    - to_lower
+    on_value:
+      then:
+      - lambda: |-
+          parseDailyForecast(x);   
+      - script.execute: all_data_received
+      - deep_sleep.enter: deep_sleep_1
+
+script:
+  - id: all_data_received
+    then:
+      - component.update: battery_voltage
+      - component.update: battery_percentage  
+      - component.update: t5_display
+
+font:
+  - file: "fonts/OpenSans-Medium.ttf"
+    id: font_small
+    size: 28
+    glyphs: |-
+      !"%()+=,-_.:°0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ abcdefghijklmnopqrstuvwxyz'/&|ÁÉÍÓÖŐÚÜŰÄáéíóöőúüűä
+  - file: "fonts/OpenSans-Medium.ttf"
+    id: font_medium
+    size: 38
+    glyphs: |-
+      !"%()+=,-_.:°0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ abcdefghijklmnopqrstuvwxyz'/&|ÁÉÍÓÖŐÚÜŰÄáéíóöőúüűä
+  - file: "fonts/OpenSans-Bold.ttf"
+    id: font_medium_bold
+    size: 38
+    glyphs: |-
+      !"%()+=,-_.:°0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ abcdefghijklmnopqrstuvwxyz'/&|ÁÉÍÓÖŐÚÜŰÄáéíóöőúüűä
+  - file: "fonts/OpenSans-Medium.ttf"
+    id: font_big
+    size: 48
+    glyphs: |-
+      !"%()+=,-_.:°0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ abcdefghijklmnopqrstuvwxyz'/&|ÁÉÍÓÖŐÚÜŰÄáéíóöőúüűä
+  - file: "fonts/OpenSans-Medium.ttf"
+    id: font_large
+    size: 56
+    glyphs: |-
+      !"%()+=,-_.:°0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ abcdefghijklmnopqrstuvwxyz'/&|ÁÉÍÓÖŐÚÜŰÄáéíóöőúüűä
+  - file: "fonts/OpenSans-Bold.ttf"
+    id: font_xlarge_bold
+    size: 72
+    glyphs: |-
+      !"%()+=,-_.:°0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ abcdefghijklmnopqrstuvwxyz'/&|ÁÉÍÓÖŐÚÜŰÄáéíóöőúüűä
+      
+  # material UI icons - from https://pictogrammers.github.io/@mdi/font/5.3.45/
+  - file: 'fonts/materialdesignicons-webfont.ttf'
+    id: font_icons
+    size: 130
+    glyphs:
+      - "\U000F0594" # clear-night
+      - "\U000F0590" # cloudy
+      - "\U000F0591" # fog
+      - "\U000F0592" # hail
+      - "\U000F0593" # lightning
+      - "\U000F067E" # lightning-rainy
+      - "\U000F0F31" # night-partly-cloudy
+      - "\U000F0595" # partly-cloudy
+      - "\U000F0596" # pouring
+      - "\U000F0597" # rainy
+      - "\U000F0F36" # snowy
+      - "\U000F067F" # snowy-rainy
+      - "\U000F0599" # sunny
+      - "\U000F059D" # windy
+      - "\U000F059E" # windy-variant
+      - "\U000F0F38" # exceptional
+  - file: 'fonts/materialdesignicons-webfont.ttf'
+    id: font_icons_small
+    size: 56
+    glyphs:
+      # weather
+      - "\U000F0594" # clear-night
+      - "\U000F0590" # cloudy
+      - "\U000F0591" # fog
+      - "\U000F0592" # hail
+      - "\U000F0593" # lightning
+      - "\U000F067E" # lightning-rainy
+      - "\U000F0F31" # night-partly-cloudy
+      - "\U000F0595" # partly-cloudy
+      - "\U000F0596" # pouring
+      - "\U000F0597" # rainy
+      - "\U000F0F36" # snowy
+      - "\U000F067F" # snowy-rainy
+      - "\U000F0599" # sunny
+      - "\U000F059D" # windy
+      - "\U000F059E" # windy-variant
+      - "\U000F0F38" # exceptional
+      - "\U000F054B" # umbrella
+      # moon phases
+      - "\U000F0F61" # moon-first-quarter
+      - "\U000F0F62" # moon-full
+      - "\U000F0F63" # moon-last-quarter
+      - "\U000F0F64" # moon-new
+      - "\U000F0F65" # moon-waning-crescent
+      - "\U000F0F66" # moon-waning-gibbous
+      - "\U000F0F67" # moon-waxing-crescent
+      - "\U000F0F68" # moon-waxing-gibbous
+      # other icons
+      - "\U000F10C2" # Temperature High
+      - "\U000F10C3" # Temperature Low
+      - "\U000F02E3" # Bed
+      - "\U000F04B9" # sofa
+      - "\U000F09A0" # shower
+      - "\U000F00ED" # calendar
+      - "\U000F104D" # cottage
+      - "\U000F06D9" # garage
+      - "\U000F06A1" # terrace
+      - "\U000F19A3" # mainentance
+      # battery
+      - "\U000F008E" # bat empty
+      - "\U000F007A" # bat 10
+      - "\U000F007B" # bat 20
+      - "\U000F007C" # bat 30
+      - "\U000F007D" # bat 40
+      - "\U000F007E" # bat 50
+      - "\U000F007F" # bat 60
+      - "\U000F0080" # bat 70
+      - "\U000F0081" # bat 80
+      - "\U000F0082" # bat 90
+      - "\U000F0079" # bat 100
+
+
+  - file: 'fonts/materialdesignicons-webfont.ttf'
+    id: font_icons_tiny
+    size: 32
+    glyphs:
+      - "\U000F005E" # arrow-up-thick
+      - "\U000F0046" # arrow-down-thick
+
+display:
+  - platform: t547
+    # rotation: 180
+    id: t5_display    
+    update_interval: 30s    
+    lambda: |-
+     // icon constants
+      #define ICON_temp_high        "\U000F10C2"
+      #define ICON_temp_low         "\U000F10C3"
+      #define ICON_umbrella         "\U000F054B"
+      #define ICON_sofa             "\U000F04B9"
+      #define ICON_shower           "\U000F09A0"
+      #define ICON_up               "\U000F005E"
+      #define ICON_down             "\U000F0046"
+      #define ICON_sun              "\U000F0599"
+      #define ICON_calendar         "\U000F00ED"
+      #define ICON_cottage          "\U000F104D"
+      #define ICON_home_floor_b     "\U000F06D9"
+      #define ICON_bed_double       "\U000F06A1"
+
+      // positioning constants
+      #define xRes 960
+      #define yRes 540
+      #define xCenter (xRes/2 + 40) // X position center
+      #define pad 10
+      #define celsiusSuperscript 12
+      #define rowHeight 75
+      #define temperatureCol 195
+      #define humidityCol 300
+      #define weatherCol 120
+      #define weatherTempCorr 15
+
+      it.clear();
+      int y = 0;
+      auto time = id(esptime).now();
+      auto dayTime = id(sun).state == "above_horizon";
+      // ** TOP: date
+      it.strftime(pad, pad, id(font_xlarge_bold), TextAlign::TOP_LEFT, "%a %Y-%m-%d", time);
+
+
+
+
+      y = 170;
+
+      if (!isnan(id(temp_outdoor).state)) {
+        it.printf(temperatureCol, y, id(font_xlarge_bold), TextAlign::CENTER_RIGHT, "%.1f", id(temp_outdoor).state);
+        it.printf(temperatureCol, y - celsiusSuperscript, id(font_large), TextAlign::CENTER_LEFT, "°C");
+      }
+      if (!isnan(id(hum_outdoor).state)) {
+        it.printf(temperatureCol + 150, y, id(font_large), TextAlign::CENTER_RIGHT, "%.0f", id(hum_outdoor).state);
+        it.printf(temperatureCol + 150, y, id(font_small), TextAlign::CENTER_LEFT, "%%");
+      }
+
+      // ** Left: Single temperatures + humidity
+      // Indoor
+      y = 290;
+      
+      
+      it.printf(pad, y, id(font_icons_small), TextAlign::BASELINE_LEFT, ICON_sofa); 
+      if (!isnan(id(temp_livingroom).state)) {
+        it.printf(temperatureCol, y, id(font_large), TextAlign::BASELINE_RIGHT, "%.1f", id(temp_livingroom).state);
+        it.printf(temperatureCol, y - celsiusSuperscript, id(font_medium), TextAlign::BASELINE_LEFT, "°C");
+      }
+      if (!isnan(id(hum_livingroom).state)) {
+        it.printf(humidityCol, y, id(font_medium), TextAlign::BASELINE_RIGHT, "%.0f", id(hum_livingroom).state);
+        it.printf(humidityCol, y, id(font_small), TextAlign::BASELINE_LEFT, "%%");
+      }
+
+      // Livingroom
+      y += rowHeight; // 350
+      it.printf(pad, y, id(font_icons_small), TextAlign::BASELINE_LEFT, ICON_home_floor_b); 
+      if (!isnan(id(temp_basement).state)) {
+        it.printf(temperatureCol, y, id(font_large), TextAlign::BASELINE_RIGHT, "%.1f", id(temp_basement).state);
+        it.printf(temperatureCol, y - celsiusSuperscript, id(font_medium), TextAlign::BASELINE_LEFT, "°C");
+      }
+      if (!isnan(id(hum_basement).state)) {
+        it.printf(humidityCol, y, id(font_medium), TextAlign::BASELINE_RIGHT, "%.0f", id(hum_basement).state);
+        it.printf(humidityCol, y, id(font_small), TextAlign::BASELINE_LEFT, "%%");
+      }
+
+  
+
+     // Bedroom
+      y += rowHeight; // 425
+      it.printf(pad, y, id(font_icons_small), TextAlign::BASELINE_LEFT, ICON_bed_double);
+      if (!isnan(id(temp_bedroom).state)) {
+        it.printf(temperatureCol, y, id(font_large), TextAlign::BASELINE_RIGHT, "%.1f", id(temp_bedroom).state);
+        it.printf(temperatureCol, y - celsiusSuperscript, id(font_medium), TextAlign::BASELINE_LEFT, "°C");
+      }
+      if (!isnan(id(hum_bedroom).state)) {
+        it.printf(humidityCol, y, id(font_medium), TextAlign::BASELINE_RIGHT, "%.0f", id(hum_bedroom).state);
+        it.printf(humidityCol, y, id(font_small), TextAlign::BASELINE_LEFT, "%%");
+      }
+
+      auto centerCol = (humidityCol + 150 + xCenter - 10) / 2;
+
+      // Battery
+      y = 500;
+      auto batIcon = batteryToIcon(id(battery_percentage).state);
+      it.printf(centerCol - 80, y + rowHeight/4, id(font_icons_small), TextAlign::BASELINE_LEFT, batIcon.c_str());
+      it.printf(centerCol, y + rowHeight/4 - 6, (font_small), TextAlign::BASELINE_CENTER, "%.0f %%", id(battery_percentage)->state);
+            
+      // ** TOP: date
+      // it.strftime(pad, pad, id(font_xlarge_bold), TextAlign::TOP_LEFT, "%a %Y-%m-%d", time);
+
+      if (id(dailyForecast).has_state()) {
+
+        y = 200;
+        it.printf(xCenter + weatherCol, y, id(font_small), TextAlign::BASELINE_CENTER, "SMHI");  
+
+        for (int i=0; i <= 2; ++i)
+        {
+          // Day of week
+          y = 240;
+          it.printf(xCenter + weatherCol * (i+1), y, id(font_small), TextAlign::BASELINE_CENTER, "%s", weatherForecastDaily[i].day.c_str());  
+
+          // Condition      
+          std::string condition = weatherForecastDaily[i].condition;
+          // it.printf(300, 0, id(font_medium_bold), TextAlign::TOP_LEFT, "%s", condition.c_str());
+          y = 295;
+          auto icon = conditionToIcon(condition, dayTime);
+          it.printf(xCenter + weatherCol * (i+1), y, id(font_icons_small), TextAlign::BASELINE_CENTER, icon.c_str()); 
+
+          // Temperature
+          y = 350;
+          if (i == 0) {
+            it.printf(xCenter, y, id(font_icons_small), TextAlign::BASELINE_LEFT, ICON_temp_high);
+          }
+
+          it.printf(xCenter + weatherCol * (i+1) + weatherTempCorr, y, id(font_large), TextAlign::BASELINE_RIGHT, "%i", weatherForecastDaily[i].temp_high);
+          it.printf(xCenter + weatherCol * (i+1) + weatherTempCorr, y - celsiusSuperscript, id(font_medium), TextAlign::BASELINE_LEFT, "°C");
+
+          // Low
+          y = 425;
+          if (i == 0) {
+            it.printf(xCenter, y, id(font_icons_small), TextAlign::BASELINE_LEFT, ICON_temp_low);
+          }
+
+          it.printf(xCenter + weatherCol * (i+1) + weatherTempCorr, y, id(font_large), TextAlign::BASELINE_RIGHT, "%i",  weatherForecastDaily[i].temp_low);
+          it.printf(xCenter + weatherCol * (i+1) + weatherTempCorr, y - celsiusSuperscript, id(font_medium), TextAlign::BASELINE_LEFT, "°C");
+          
+          // Precipitation
+          y = 500;
+          if (i == 0) {
+            it.printf(xCenter, y, id(font_icons_small), TextAlign::BASELINE_LEFT, ICON_umbrella);
+          }
+
+          it.printf(xCenter + weatherCol * (i+1) + weatherTempCorr, y, id(font_large), TextAlign::BASELINE_RIGHT, "%i", weatherForecastDaily[i].precipitation);
+          it.printf(xCenter + weatherCol * (i+1) + weatherTempCorr, y - celsiusSuperscript, id(font_medium), TextAlign::BASELINE_LEFT, "mm");
+
+        }    
+
+      }
